@@ -521,7 +521,7 @@ static const struct dap_ops dmem_dap_ops = {
 	.quit = dmem_disconnect,
 };
 
-static const char *const dmem_dap_transport[] = { "dmem", NULL };
+static const char *const dmem_dap_transport[] = { "dapdirect_swd", NULL };
 
 struct adapter_driver dmem_dap_adapter_driver = {
 	.name = "dmem",

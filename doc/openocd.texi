@@ -3685,6 +3685,54 @@ espusbjtag chip_id 1
 
 @end deffn
 
+@deffn {Interface Driver} {dmem} Direct Memory access debug interface
+
+The Texas Instruments K3 SoC family provides memory access to DAP
+and coresight control registers. This allows us to control the
+microcontrollers directly from one of the processors on the SOC
+itself.
+
+For maximum performance the driver accesses memory-mapped the debug
+memory registers directly. The memory mapping requires read and write
+permission to kernel memory via "/dev/mem" and assumes that the system
+firewall configurations permit direct access to the debug memory
+space.
+
+NOTE: Firewalls are configurable in K3 SoC and depending on various types of
+device configuration, this function may be blocked out, typical behavior
+observed in such cases is a firewall exception report on the security
+controller and armv8 processor reporting a system error.
+
+See @file{tcl/interface/ti_k3_am625-swd-native.cfg} for a sample configuration
+file.
+
+@deffn {Config Command} {base_address base_address}
+Set the DAPBus base address which is used to access CoreSight
+compliant Access Ports(APs) directly.
+@end deffn
+
+@deffn {Config Command} {ap_address_offset offset_address}
+Set the address offset between Access ports (APs).
+@end deffn
+
+@deffn {Config Command} {max_aps}
+Set the maximum number of valid access ports on the SoC.
+@end deffn
+
+@deffn {Config Command} {emu_ap_list list_of_ap_ids}
+Set the list of Access ports that need to be emulated. This is the
+list of APs where the system prevents or does'nt have access directly
+to Access Port directly. Instead, provides a emulation mode which
+allows the of use AP ID and translate to direct coresight register
+access.
+@end deffn
+
+@deffn {Config Command} {emu_base_address base_address address_window_size}
+Set the emulated address and address window size.
+@end deffn
+
+@end deffn
+
 @section Transport Configuration
 @cindex Transport
 As noted earlier, depending on the version of OpenOCD you use,

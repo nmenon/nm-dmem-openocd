@@ -103,7 +103,7 @@ static int dmem_fd = -1;
 static int dmem_dap_retval = ERROR_OK;
 
 /* Default dmem device. */
-#define RSHIM_DEV_PATH_DEFAULT	"/dev/dmem0/dmem"
+#define DMEM_DEV_PATH_DEFAULT	"/dev/mem"
 static char *dmem_dev_path;
 
 static int dmem_dev_read(int chan, int addr, uint64_t *value)
@@ -416,7 +416,7 @@ static int dmem_dp_run(struct adiv5_dap *dap)
 
 static int dmem_connect(struct adiv5_dap *dap)
 {
-	char *path = dmem_dev_path ? dmem_dev_path : RSHIM_DEV_PATH_DEFAULT;
+	char *path = dmem_dev_path ? dmem_dev_path : DMEM_DEV_PATH_DEFAULT;
 
 	dmem_fd = open(path, O_RDWR | O_SYNC);
 	if (dmem_fd == -1) {
@@ -461,7 +461,7 @@ static const struct command_registration dmem_dap_subcommand_handlers[] = {
 		.handler = dmem_dap_device_command,
 		.mode = COMMAND_CONFIG,
 		.help = "set the dmem device",
-		.usage = "</dev/dmem<N>/dmem>",
+		.usage = "</dev/mem>",
 	},
 	COMMAND_REGISTRATION_DONE
 };

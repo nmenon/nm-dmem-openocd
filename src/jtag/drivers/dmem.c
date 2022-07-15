@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2020, Mellanox Technologies Ltd. - All Rights Reserved
- * Liming Sun <lsun@mellanox.com>
+ * Copyright (C) 2022 Texas Instruments Incorporated - https://www.ti.com/
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,9 +26,6 @@
 #include <helper/time_support.h>
 #include <helper/list.h>
 #include <jtag/interface.h>
-#ifdef HAVE_SYS_IOCTL_H
-#include <sys/ioctl.h>
-#endif
 
 #include <target/arm_adi_v5.h>
 #include <transport/transport.h>

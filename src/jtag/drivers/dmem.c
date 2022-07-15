@@ -59,6 +59,144 @@ static void *dmem_emu_virt_base_addr;
 static uint8_t dmem_emu_ap_count;
 static uint64_t dmem_emu_ap_list[DMEM_MAX_EMULATE_APS];
 
+/* Emulation mode state variables */
+static uint32_t apbap_tar;
+static uint32_t apbap_tar_inc;
+static uint32_t apbap_csw;
+static uint32_t apbap_cfg;
+static uint32_t apbap_base;
+static uint32_t apbap_idr;
+
+/*
+ * EMULATION MODE: In Emulation MODE, we assume the following:
+ * TCL still describes as system is operational from the view of AP (ex. jtag)
+ * However, the hardware does'nt permit direct memory access to these APs
+ * (only permitted via JTAG).
+ *
+ * So, the access to these APs have to be decoded to a memory map
+ * access which we can directly access.
+ *
+ * A few TI processors have this issue.
+ */
+static int dmem_is_emulated_ap(struct adiv5_ap *ap)
+{
+	int i;
+
+	for (i = 0; i < dmem_emu_ap_count; i++) {
+		if (ap->ap_num == dmem_emu_ap_list[i])
+			return ERROR_OK;
+	}
+	return ERROR_FAIL;
+}
+
+static void dmem_emu_set_ap_reg(uint64_t addr, uint32_t val)
+{
+	LOG_ERROR("%s: 0x%lx (absolute: 0x%lx) <= 0x%08x\n", __func__, addr, dmem_emu_base_address+addr, val);
+	*(volatile uint32_t *)((char *)dmem_emu_virt_base_addr + addr);
+}
+
+static uint32_t dmem_emu_get_ap_reg(uint64_t addr)
+{
+	uint32_t val = *(volatile uint32_t *)((char*)dmem_emu_virt_base_addr + addr);
+	LOG_ERROR("%s: 0x%lx (absolute: 0x%lx) => 0x%08x\n", __func__, addr, dmem_emu_base_address+addr, val);
+	return val;
+}
+
+static int dmem_emu_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
+			   uint32_t *data)
+{
+	uint64_t addr;
+
+	switch (reg) {
+	case ADIV5_MEM_AP_REG_CSW:
+		*data = apbap_csw;
+		break;
+	case ADIV5_MEM_AP_REG_TAR:
+		*data = apbap_tar;
+		break;
+	case ADIV5_MEM_AP_REG_CFG:
+		*data = 0;
+		break;
+	case ADIV5_MEM_AP_REG_BASE:
+		*data = 0;
+		break;
+	case ADIV5_AP_REG_IDR:
+		*data = 0;
+		break;
+	case ADIV5_MEM_AP_REG_BD0:
+	case ADIV5_MEM_AP_REG_BD1:
+	case ADIV5_MEM_AP_REG_BD2:
+	case ADIV5_MEM_AP_REG_BD3:
+		addr = (apbap_tar & ~0xf) + (reg & 0x0C);
+
+		*data = dmem_emu_get_ap_reg(addr);
+
+		break;
+	case ADIV5_MEM_AP_REG_DRW:
+		addr = (apbap_tar & ~0x3) + apbap_tar_inc;
+
+		*data = dmem_emu_get_ap_reg(addr);
+
+		if (apbap_csw & CSW_ADDRINC_MASK) {
+			apbap_tar_inc += (apbap_csw & 0x03) * 2;
+		}
+		break;
+	default:
+		LOG_INFO("%s: Unknown reg: 0x%02x\n", __func__, reg);
+		return ERROR_FAIL;
+	}
+	return ERROR_OK;
+}
+
+static int dmem_emu_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
+			    uint32_t data)
+{
+	uint64_t addr;
+
+	switch (reg) {
+	case ADIV5_MEM_AP_REG_CSW:
+		apbap_csw = data;
+		break;
+	case ADIV5_MEM_AP_REG_TAR:
+		apbap_tar = data;
+		apbap_tar_inc = 0;
+		break;
+	case ADIV5_MEM_AP_REG_CFG:
+		apbap_cfg = data;
+		break;
+	case ADIV5_MEM_AP_REG_BASE:
+		apbap_base = data;
+		break;
+	case ADIV5_AP_REG_IDR:
+		apbap_idr = data;
+		break;
+	case ADIV5_MEM_AP_REG_BD0:
+	case ADIV5_MEM_AP_REG_BD1:
+	case ADIV5_MEM_AP_REG_BD2:
+	case ADIV5_MEM_AP_REG_BD3:
+		addr = (apbap_tar & ~0xf) + (reg & 0x0C);
+
+		dmem_emu_set_ap_reg(addr, data);
+
+		break;
+	case ADIV5_MEM_AP_REG_DRW:
+		addr = (apbap_tar & ~0x3) + apbap_tar_inc;
+		dmem_emu_set_ap_reg(addr, data);
+
+		if (apbap_csw & CSW_ADDRINC_MASK) {
+			apbap_tar_inc += (apbap_csw & 0x03) * 2;
+		}
+		break;
+	default:
+		LOG_INFO("%s: Unknown reg: 0x%02x\n", __func__, reg);
+		return ERROR_FAIL;
+	}
+
+	return ERROR_OK;
+}
+
+
+/* AP MODE */
 static uint32_t dmem_get_ap_reg_offset(struct adiv5_ap *ap, unsigned int reg)
 {
 	return (dmem_dap_ap_offset * ap->ap_num) + reg;
@@ -126,6 +264,10 @@ static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 		return ERROR_FAIL;
 	}
 
+	if (dmem_is_emulated_ap(ap) == ERROR_OK) {
+		return dmem_emu_ap_q_read(ap, reg, data);
+	}
+
 	*data = dmem_get_ap_reg(ap, reg);
 
 	return ERROR_OK;
@@ -147,6 +289,10 @@ static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 		LOG_ERROR("%s: BANK=%d AP=%ld wrote[0x%02x]: 0x%08x\n", __func__, ap_bank, ap->ap_num, reg, data);
 		dmem_dap_retval = ERROR_FAIL;
 		return ERROR_FAIL;
+	}
+
+	if (dmem_is_emulated_ap(ap) == ERROR_OK) {
+		return dmem_emu_ap_q_write(ap, reg, data);
 	}
 
 	dmem_set_ap_reg(ap, reg, data);

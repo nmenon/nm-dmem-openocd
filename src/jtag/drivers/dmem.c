@@ -55,7 +55,6 @@ static uint32_t dmem_dap_ap_offset = 0x100;
 /* AP Emulation Mode */
 static uint64_t dmem_emu_base_address;
 static uint64_t dmem_emu_mapped_size;
-static uint64_t dmem_emu_mask_address_bits;
 static void *dmem_emu_virt_base_addr;
 #define DMEM_MAX_EMULATE_APS 5
 static uint8_t dmem_emu_ap_count;
@@ -482,17 +481,6 @@ COMMAND_HANDLER(dmem_emu_base_address_command)
 	return ERROR_OK;
 }
 
-COMMAND_HANDLER(dmem_emu_mask_address_bits_command)
-{
-	if (CMD_ARGC != 1) {
-		command_print(CMD, "Too many arguments");
-		return ERROR_COMMAND_SYNTAX_ERROR;
-	}
-	COMMAND_PARSE_NUMBER(u64, CMD_ARGV[0], dmem_emu_mask_address_bits);
-
-	return ERROR_OK;
-}
-
 COMMAND_HANDLER(dmem_emu_ap_list_command)
 {
 	int i;
@@ -534,7 +522,6 @@ COMMAND_HANDLER(dmem_dap_config_info_command)
 
 		command_print(CMD," Emulated AP details:");
 		command_print(CMD," Emulated address  : 0x%lx", dmem_emu_base_address);
-		command_print(CMD," Emulated maskout  : 0x%lx", dmem_emu_mask_address_bits);
 		command_print(CMD," Emulated size     : 0x%lx", dmem_emu_mapped_size);
 		for (i = 0; i < dmem_emu_ap_count; i++)
 			command_print(CMD," Emulated AP [%d]  : %ld", i, dmem_emu_ap_list[i]);
@@ -577,13 +564,6 @@ static const struct command_registration dmem_dap_subcommand_handlers[] = {
 		.mode = COMMAND_CONFIG,
 		.help = "set the base address and size of emulated AP range (all emulated APs access this range)",
 		.usage = "<0x100 0x100>",
-	},
-	{
-		.name = "emu_mask_address_bits",
-		.handler = dmem_emu_mask_address_bits_command,
-		.mode = COMMAND_CONFIG,
-		.help = "set the maskout bits for address decoded to or from the system",
-		.usage = "<0x80000000>",
 	},
 	{
 		.name = "emu_ap_list",

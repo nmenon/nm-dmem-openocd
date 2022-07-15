@@ -349,6 +349,7 @@ COMMAND_HANDLER(dmem_dap_config_info_command)
 	command_print(CMD," Base Address : 0x%lx", dmem_dap_base_address);
 	command_print(CMD," Max APs      : %d", dmem_dap_max_aps);
 	command_print(CMD," AP offset    : 0x%08x", dmem_dap_ap_offset);
+	command_print(CMD," Emulated AP Count : %d", dmem_emu_ap_count);
 
 	if (dmem_emu_ap_count) {
 		int i;
@@ -356,7 +357,6 @@ COMMAND_HANDLER(dmem_dap_config_info_command)
 		command_print(CMD," Emulated AP details:");
 		command_print(CMD," Emulated address  : 0x%lx", dmem_emu_base_address);
 		command_print(CMD," Emulated size     : 0x%lx", dmem_emu_mapped_size);
-		command_print(CMD," Emulated AP Count : %d", dmem_emu_ap_count);
 		for (i = 0; i < dmem_emu_ap_count; i++)
 			command_print(CMD," Emulated AP [%d]  : %ld", i, dmem_emu_ap_list[i]);
 	}

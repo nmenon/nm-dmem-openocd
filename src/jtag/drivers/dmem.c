@@ -114,6 +114,7 @@ static int dmem_emu_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 			   uint32_t *data)
 {
 	uint64_t addr;
+	int ret = ERROR_OK;
 
 	switch (reg) {
 	case ADIV5_MEM_AP_REG_CSW:
@@ -151,15 +152,22 @@ static int dmem_emu_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 		break;
 	default:
 		LOG_INFO("%s: Unknown reg: 0x%02x\n", __func__, reg);
-		return ERROR_FAIL;
+		ret = ERROR_FAIL;
+		break;
 	}
-	return ERROR_OK;
+
+	/* Track the last error code. */
+	if (ret != ERROR_OK)
+		dmem_dap_retval = ret;
+
+	return ret;
 }
 
 static int dmem_emu_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 			    uint32_t data)
 {
 	uint64_t addr;
+	int ret = ERROR_OK;
 
 	switch (reg) {
 	case ADIV5_MEM_AP_REG_CSW:
@@ -169,6 +177,7 @@ static int dmem_emu_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 		apbap_tar = data;
 		apbap_tar_inc = 0;
 		break;
+
 	case ADIV5_MEM_AP_REG_CFG:
 		apbap_cfg = data;
 		break;
@@ -178,6 +187,7 @@ static int dmem_emu_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 	case ADIV5_AP_REG_IDR:
 		apbap_idr = data;
 		break;
+
 	case ADIV5_MEM_AP_REG_BD0:
 	case ADIV5_MEM_AP_REG_BD1:
 	case ADIV5_MEM_AP_REG_BD2:
@@ -197,12 +207,16 @@ static int dmem_emu_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 		break;
 	default:
 		LOG_INFO("%s: Unknown reg: 0x%02x\n", __func__, reg);
-		return ERROR_FAIL;
+		ret = EINVAL;
+		break;
 	}
 
-	return ERROR_OK;
-}
+	/* Track the last error code. */
+	if (ret != ERROR_OK)
+		dmem_dap_retval = ret;
 
+	return ret;
+}
 
 /* AP MODE */
 static uint32_t dmem_get_ap_reg_offset(struct adiv5_ap *ap, unsigned int reg)

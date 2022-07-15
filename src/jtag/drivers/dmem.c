@@ -30,6 +30,7 @@
 #include <target/arm_adi_v5.h>
 #include <transport/transport.h>
 
+#define ARM_APB_PADDR31 (0x1 << 31)
 
 /* Use local variable stub for DP/AP registers. */
 static uint32_t dp_ctrl_stat;
@@ -92,18 +93,16 @@ static int dmem_is_emulated_ap(struct adiv5_ap *ap)
 
 static void dmem_emu_set_ap_reg(uint64_t addr, uint32_t val)
 {
-	if (dmem_emu_mask_address_bits)
-		addr &= ~dmem_emu_mask_address_bits;
+	addr &= ~ARM_APB_PADDR31;
 
-	*(volatile uint32_t *)((char *)dmem_emu_virt_base_addr + addr);
+	*(volatile uint32_t *)((char *)dmem_emu_virt_base_addr + addr) = val;
 }
 
 static uint32_t dmem_emu_get_ap_reg(uint64_t addr)
 {
 	uint32_t val;
 
-	if (dmem_emu_mask_address_bits)
-		addr &= ~dmem_emu_mask_address_bits;
+	addr &= ~ARM_APB_PADDR31;
 
 	val = *(volatile uint32_t *)((char*)dmem_emu_virt_base_addr + addr);
 
@@ -417,10 +416,10 @@ static int dmem_connect(struct adiv5_dap *dap)
 
 static void dmem_disconnect(struct adiv5_dap *dap)
 {
-	if (munmap(dmem_map_base, dmem_mapped_size) != -1) {
+	if (munmap(dmem_map_base, dmem_mapped_size) == -1) {
 		LOG_ERROR("%s: Failed to unmap mapped memory!\n", __func__);
 	}
-	if (dmem_emu_ap_count && munmap(dmem_emu_virt_base_addr, dmem_emu_mapped_size) != -1) {
+	if (dmem_emu_ap_count && munmap(dmem_emu_virt_base_addr, dmem_emu_mapped_size) == -1) {
 		LOG_ERROR("%s: Failed to unmap emu mapped memory!\n", __func__);
 	}
 	if (dmem_fd != -1) {

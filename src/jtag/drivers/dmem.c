@@ -100,7 +100,7 @@ static void dmem_emu_set_ap_reg(uint64_t addr, uint32_t val)
 
 static uint32_t dmem_emu_get_ap_reg(uint64_t addr)
 {
-	uint32_t val = *(volatile uint32_t *)((char*)dmem_emu_virt_base_addr + addr);
+	uint32_t val;
 
 	if (dmem_emu_mask_address_bits)
 		addr &= ~dmem_emu_mask_address_bits;

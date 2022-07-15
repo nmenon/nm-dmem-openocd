@@ -90,9 +90,6 @@ static uint32_t ap_csw;
 static uint32_t ap_drw;
 static uint32_t ap_tar, ap_tar_inc;
 
-/* Static functions to read/write via dmem/coresight. */
-static int (*dmem_read)(int chan, int addr, uint64_t *value);
-static int (*dmem_write)(int chan, int addr, uint64_t value);
 static int coresight_write(uint32_t tile, uint32_t addr, uint32_t wdata);
 static int coresight_read(uint32_t tile, uint32_t addr, uint32_t *value);
 
@@ -108,48 +105,6 @@ static char *dmem_dev_path;
 static uint64_t dmem_dap_base_address;
 static uint8_t dmem_dap_max_aps = 1;
 static uint32_t dmem_dap_ap_offset = 0x100;
-
-static int dmem_dev_read(int chan, int addr, uint64_t *value)
-{
-	int rc;
-
-	addr = (addr & 0xFFFF) | (1 << 16);
-	rc = pread(dmem_fd, value, sizeof(*value), addr);
-
-#ifdef HAVE_SYS_IOCTL_H
-	if (rc < 0 && errno == ENOSYS) {
-		dmem_ioctl_msg msg;
-
-		msg.addr = addr;
-		msg.data = 0;
-		rc = ioctl(dmem_fd, RSH_IOC_READ, &msg);
-		if (!rc)
-			*value = msg.data;
-	}
-#endif
-
-	return rc;
-}
-
-static int dmem_dev_write(int chan, int addr, uint64_t value)
-{
-	int rc;
-
-	addr = (addr & 0xFFFF) | (1 << 16);
-	rc = pwrite(dmem_fd, &value, sizeof(value), addr);
-
-#ifdef HAVE_SYS_IOCTL_H
-	if (rc < 0 && errno == ENOSYS) {
-		dmem_ioctl_msg msg;
-
-		msg.addr = addr;
-		msg.data = value;
-		rc = ioctl(dmem_fd, RSH_IOC_WRITE, &msg);
-	}
-#endif
-
-	return rc;
-}
 
 /* Convert AP address to tile local address. */
 static void ap_addr_2_tile(int *tile, uint32_t *addr)
@@ -172,75 +127,20 @@ static void ap_addr_2_tile(int *tile, uint32_t *addr)
  */
 static int coresight_write(uint32_t tile, uint32_t addr, uint32_t wdata)
 {
-	uint64_t ctl = 0;
-	int rc;
-
-	if (!dmem_read || !dmem_write)
-		return ERROR_FAIL;
-
-	/*
-	 * ADDR[28]    - must be set to 1 due to coresight ip.
-	 * ADDR[27:24] - linear tile id
-	 */
-	addr = (addr >> 2) | (tile << 24);
-	if (tile)
-		addr |= (1 << 28);
-	RSH_CS_SET_FIELD(ctl, ADDR, addr);
-	RSH_CS_SET_FIELD(ctl, ACTION, 0);	/* write */
-	RSH_CS_SET_FIELD(ctl, DATA, wdata);
-	RSH_CS_SET_FIELD(ctl, GO, 1);		/* start */
-
-	dmem_write(RSH_MMIO_CHANNEL_RSHIM, RSH_CORESIGHT_CTL, ctl);
-
-	do {
-		rc = dmem_read(RSH_MMIO_CHANNEL_RSHIM,
-				RSH_CORESIGHT_CTL, &ctl);
-		if (rc < 0) {
-			LOG_ERROR("Failed to read dmem.\n");
-			return rc;
-		}
-	} while (RSH_CS_GET_FIELD(ctl, GO));
-
+	LOG_ERROR("I am here: %s\n", __func__);
 	return ERROR_OK;
 }
 
 static int coresight_read(uint32_t tile, uint32_t addr, uint32_t *value)
 {
-	uint64_t ctl = 0;
-	int rc;
-
-	if (!dmem_read || !dmem_write)
-		return ERROR_FAIL;
-
-	/*
-	 * ADDR[28]    - must be set to 1 due to coresight ip.
-	 * ADDR[27:24] - linear tile id
-	 */
-	addr = (addr >> 2) | (tile << 24);
-	if (tile)
-		addr |= (1 << 28);
-	RSH_CS_SET_FIELD(ctl, ADDR, addr);
-	RSH_CS_SET_FIELD(ctl, ACTION, 1);	/* read */
-	RSH_CS_SET_FIELD(ctl, GO, 1);		/* start */
-
-	dmem_write(RSH_MMIO_CHANNEL_RSHIM, RSH_CORESIGHT_CTL, ctl);
-
-	do {
-		rc = dmem_read(RSH_MMIO_CHANNEL_RSHIM,
-				RSH_CORESIGHT_CTL, &ctl);
-		if (rc < 0) {
-			LOG_ERROR("Failed to write dmem.\n");
-			return rc;
-		}
-	} while (RSH_CS_GET_FIELD(ctl, GO));
-
-	*value = RSH_CS_GET_FIELD(ctl, DATA);
+	LOG_ERROR("I am here: %s\n", __func__);
 	return ERROR_OK;
 }
 
 static int dmem_dp_q_read(struct adiv5_dap *dap, unsigned int reg,
 			   uint32_t *data)
 {
+	LOG_ERROR("I am here: %s\n", __func__);
 	if (!data)
 		return ERROR_OK;
 
@@ -263,6 +163,7 @@ static int dmem_dp_q_read(struct adiv5_dap *dap, unsigned int reg,
 static int dmem_dp_q_write(struct adiv5_dap *dap, unsigned int reg,
 			    uint32_t data)
 {
+	LOG_ERROR("I am here: %s\n", __func__);
 	switch (reg) {
 	case DP_CTRL_STAT:
 		dp_ctrl_stat = data;
@@ -282,6 +183,7 @@ static int dmem_dp_q_write(struct adiv5_dap *dap, unsigned int reg,
 static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 			   uint32_t *data)
 {
+	LOG_ERROR("I am here: %s\n", __func__);
 	uint32_t addr;
 	int rc = ERROR_OK, tile;
 
@@ -346,6 +248,7 @@ static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 			    uint32_t data)
 {
+	LOG_ERROR("I am here: %s\n", __func__);
 	int rc = ERROR_OK, tile;
 	uint32_t addr;
 
@@ -404,11 +307,13 @@ static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 
 static int dmem_ap_q_abort(struct adiv5_dap *dap, uint8_t *ack)
 {
+	LOG_ERROR("I am here: %s\n", __func__);
 	return ERROR_OK;
 }
 
 static int dmem_dp_run(struct adiv5_dap *dap)
 {
+	LOG_ERROR("I am here: %s\n", __func__);
 	int retval = dmem_dap_retval;
 
 	/* Clear the error code. */
@@ -419,6 +324,7 @@ static int dmem_dp_run(struct adiv5_dap *dap)
 
 static int dmem_connect(struct adiv5_dap *dap)
 {
+	LOG_ERROR("I am here: %s\n", __func__);
 	char *path = dmem_dev_path ? dmem_dev_path : DMEM_DEV_PATH_DEFAULT;
 
 	dmem_fd = open(path, O_RDWR | O_SYNC);
@@ -427,19 +333,12 @@ static int dmem_connect(struct adiv5_dap *dap)
 		return ERROR_FAIL;
 	}
 
-	/*
-	 * Set read/write operation via the device file. Function pointers
-	 * are used here so more ways like remote accessing via socket could
-	 * be added later.
-	 */
-	dmem_read = dmem_dev_read;
-	dmem_write = dmem_dev_write;
-
 	return ERROR_OK;
 }
 
 static void dmem_disconnect(struct adiv5_dap *dap)
 {
+	LOG_ERROR("I am here: %s\n", __func__);
 	if (dmem_fd != -1) {
 		close(dmem_fd);
 		dmem_fd = -1;

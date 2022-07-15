@@ -20,6 +20,8 @@
 #include "config.h"
 #endif
 
+#include <sys/mman.h>
+
 #include <helper/types.h>
 #include <helper/system.h>
 #include <helper/time_support.h>
@@ -28,8 +30,10 @@
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
+
 #include <target/arm_adi_v5.h>
 #include <transport/transport.h>
+
 
 /* Use local variable stub for DP/AP registers. */
 static uint32_t dp_ctrl_stat;
@@ -38,6 +42,8 @@ static uint32_t ap_sel, ap_bank;
 
 /* Dmem file handler. */
 static int dmem_fd = -1;
+static void *dmem_map_base, *dmem_virt_base_addr;
+static long dmem_mapped_start, dmem_mapped_size;
 
 /* DAP error code. */
 static int dmem_dap_retval = ERROR_OK;
@@ -48,6 +54,21 @@ static char *dmem_dev_path;
 static uint64_t dmem_dap_base_address;
 static uint8_t dmem_dap_max_aps = 1;
 static uint32_t dmem_dap_ap_offset = 0x100;
+
+static uint32_t dmem_get_ap_reg_offset(struct adiv5_ap *ap, unsigned int reg)
+{
+	return (dmem_dap_ap_offset * ap->ap_num) + reg;
+}
+
+static void dmem_set_ap_reg(struct adiv5_ap *ap, unsigned int reg, unsigned int val)
+{
+	*(volatile uint32_t *)((char *)dmem_virt_base_addr + dmem_get_ap_reg_offset(ap, reg)) = val;
+}
+
+static uint32_t dmem_get_ap_reg(struct adiv5_ap *ap, unsigned int reg)
+{
+	return *(volatile uint32_t *)((char*)dmem_virt_base_addr + dmem_get_ap_reg_offset(ap, reg));
+}
 
 static int dmem_dp_q_read(struct adiv5_dap *dap, unsigned int reg,
 			   uint32_t *data)
@@ -96,7 +117,6 @@ static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 			   uint32_t *data)
 {
 	LOG_ERROR("I am here: %s\n", __func__);
-	int rc = ERROR_OK;
 
 	if (is_adiv6(ap->dap)) {
 		static bool error_flagged;
@@ -106,35 +126,16 @@ static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 		return ERROR_FAIL;
 	}
 
-	switch (reg) {
-	case ADIV5_MEM_AP_REG_CSW:
-	case ADIV5_MEM_AP_REG_CFG:
-	case ADIV5_MEM_AP_REG_BASE:
-	case ADIV5_AP_REG_IDR:
-	case ADIV5_MEM_AP_REG_BD0:
-	case ADIV5_MEM_AP_REG_BD1:
-	case ADIV5_MEM_AP_REG_BD2:
-	case ADIV5_MEM_AP_REG_BD3:
-	case ADIV5_MEM_AP_REG_DRW:
-		break;
-	default:
-		LOG_INFO("Unknown command");
-		rc = ERROR_FAIL;
-		break;
-	}
+	*data = dmem_get_ap_reg(ap, reg);
+	LOG_ERROR("%s: AP=%ld read[0x%02x]: 0x%08x\n", __func__, ap-> ap_num, reg, *data);
 
-	/* Track the last error code. */
-	if (rc != ERROR_OK)
-		dmem_dap_retval = rc;
-
-	return rc;
+	return ERROR_OK;
 }
 
 static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 			    uint32_t data)
 {
 	LOG_ERROR("I am here: %s\n", __func__);
-	int rc = ERROR_OK;
 
 	if (is_adiv6(ap->dap)) {
 		static bool error_flagged;
@@ -145,30 +146,15 @@ static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 	}
 
 	if (ap_bank != 0) {
+		LOG_ERROR("%s: BANK=%d AP=%ld wrote[0x%02x]: 0x%08x\n", __func__, ap_bank, ap->ap_num, reg, data);
 		dmem_dap_retval = ERROR_FAIL;
 		return ERROR_FAIL;
 	}
 
-	switch (reg) {
-	case ADIV5_MEM_AP_REG_CSW:
-	case ADIV5_MEM_AP_REG_TAR:
-	case ADIV5_MEM_AP_REG_BD0:
-	case ADIV5_MEM_AP_REG_BD1:
-	case ADIV5_MEM_AP_REG_BD2:
-	case ADIV5_MEM_AP_REG_BD3:
-	case ADIV5_MEM_AP_REG_DRW:
-		break;
+	dmem_set_ap_reg(ap, reg, data);
+	LOG_ERROR("%s: AP=%ld wrote[0x%02x]: 0x%08x\n", __func__, ap->ap_num, reg, data);
 
-	default:
-		rc = EINVAL;
-		break;
-	}
-
-	/* Track the last error code. */
-	if (rc != ERROR_OK)
-		dmem_dap_retval = rc;
-
-	return rc;
+	return ERROR_OK;
 }
 
 static int dmem_ap_q_abort(struct adiv5_dap *dap, uint8_t *ack)
@@ -190,14 +176,55 @@ static int dmem_dp_run(struct adiv5_dap *dap)
 
 static int dmem_connect(struct adiv5_dap *dap)
 {
-	LOG_ERROR("I am here: %s\n", __func__);
 	char *path = dmem_dev_path ? dmem_dev_path : DMEM_DEV_PATH_DEFAULT;
+	uint32_t dmem_total_memory_window_size;
+	long page_size = sysconf(_SC_PAGESIZE);
+	long start_delta, end_delta;
+
+	LOG_ERROR("I am here: %s\n", __func__);
+
+	if (!dmem_dap_base_address) {
+		LOG_ERROR("dmem DAP Base address NOT set? value is 0\n");
+		return ERROR_FAIL;
+	}
 
 	dmem_fd = open(path, O_RDWR | O_SYNC);
 	if (dmem_fd == -1) {
 		LOG_ERROR("Unable to open %s\n", path);
 		return ERROR_FAIL;
 	}
+	LOG_ERROR("page_size = %ld\n", page_size);
+
+	dmem_total_memory_window_size = (dmem_dap_max_aps + 1) * dmem_dap_ap_offset;
+
+
+	/* if start is NOT aligned, then we need to map a page previously */
+	dmem_mapped_start = dmem_dap_base_address;
+	dmem_mapped_size = dmem_total_memory_window_size;
+
+	start_delta = dmem_dap_base_address % page_size;
+	if (start_delta) {
+		dmem_mapped_start -= start_delta;
+		dmem_mapped_size += start_delta;
+	}
+
+	/* End should also be aligned to page_size */
+	end_delta = dmem_mapped_size % page_size;
+	if (end_delta)
+		dmem_mapped_size += page_size - end_delta;
+
+
+	dmem_map_base = mmap(NULL,
+			dmem_mapped_size,
+			(PROT_READ | PROT_WRITE),
+			MAP_SHARED, dmem_fd,
+			dmem_mapped_start & ~(off_t) (page_size - 1));
+	if (dmem_map_base == MAP_FAILED) {
+		LOG_ERROR("Mapping address 0x%lx for 0x%lx failed!\n", dmem_mapped_start,dmem_mapped_size);
+		return ERROR_FAIL;
+	}
+
+	dmem_virt_base_addr = (char *)dmem_map_base + start_delta;
 
 	return ERROR_OK;
 }
@@ -205,6 +232,9 @@ static int dmem_connect(struct adiv5_dap *dap)
 static void dmem_disconnect(struct adiv5_dap *dap)
 {
 	LOG_ERROR("I am here: %s\n", __func__);
+	if (munmap(dmem_map_base, dmem_mapped_size) != -1) {
+		LOG_ERROR("%s: Failed to unmap mapped memory!\n", __func__);
+	}
 	if (dmem_fd != -1) {
 		close(dmem_fd);
 		dmem_fd = -1;

@@ -31,69 +31,12 @@
 #include <target/arm_adi_v5.h>
 #include <transport/transport.h>
 
-/* Rshim channel where the CoreSight register resides. */
-#define RSH_MMIO_CHANNEL_RSHIM	0x1
-
-/* APB and tile address translation. */
-#define RSH_CS_ROM_BASE		0x80000000
-#define RSH_CS_TILE_BASE	0x44000000
-#define RSH_CS_TILE_SIZE	0x04000000
-
-/*
- * APB-AP Identification Register
- * The default value is defined in "CoreSight on-chip trace and debug
- * (Revision: r1p0)", Section 3.16.5 APB-AP register summary.
- */
-#define APB_AP_IDR			0x44770002
-
-/* CoreSight register definition. */
-#define RSH_CORESIGHT_CTL		0x0e00
-#define RSH_CORESIGHT_CTL_GO_SHIFT	0
-#define RSH_CORESIGHT_CTL_GO_MASK	0x1ULL
-#define RSH_CORESIGHT_CTL_ACTION_SHIFT	1
-#define RSH_CORESIGHT_CTL_ACTION_MASK	0x2ULL
-#define RSH_CORESIGHT_CTL_ADDR_SHIFT	2
-#define RSH_CORESIGHT_CTL_ADDR_MASK	0x7ffffffcULL
-#define RSH_CORESIGHT_CTL_ERR_SHIFT	31
-#define RSH_CORESIGHT_CTL_ERR_MASK	0x80000000ULL
-#define RSH_CORESIGHT_CTL_DATA_SHIFT	32
-#define RSH_CORESIGHT_CTL_DATA_MASK	0xffffffff00000000ULL
-
-/* Util macros to access the CoreSight register. */
-#define RSH_CS_GET_FIELD(reg, field) \
-	(((uint64_t)(reg) & RSH_CORESIGHT_CTL_##field##_MASK) >> \
-		RSH_CORESIGHT_CTL_##field##_SHIFT)
-
-#define RSH_CS_SET_FIELD(reg, field, value) \
-	(reg) = (((reg) & ~RSH_CORESIGHT_CTL_##field##_MASK) | \
-		(((uint64_t)(value) << RSH_CORESIGHT_CTL_##field##_SHIFT) & \
-		RSH_CORESIGHT_CTL_##field##_MASK))
-
-#ifdef HAVE_SYS_IOCTL_H
-/* Message used to program dmem via ioctl(). */
-typedef struct {
-	uint32_t addr;
-	uint64_t data;
-} __attribute__((packed)) dmem_ioctl_msg;
-
-enum {
-	RSH_IOC_READ = _IOWR('R', 0, dmem_ioctl_msg),
-	RSH_IOC_WRITE = _IOWR('R', 1, dmem_ioctl_msg),
-};
-#endif
-
 /* Use local variable stub for DP/AP registers. */
 static uint32_t dp_ctrl_stat;
 static uint32_t dp_id_code;
 static uint32_t ap_sel, ap_bank;
-static uint32_t ap_csw;
-static uint32_t ap_drw;
-static uint32_t ap_tar, ap_tar_inc;
 
-static int coresight_write(uint32_t tile, uint32_t addr, uint32_t wdata);
-static int coresight_read(uint32_t tile, uint32_t addr, uint32_t *value);
-
-/* RShim file handler. */
+/* Dmem file handler. */
 static int dmem_fd = -1;
 
 /* DAP error code. */
@@ -105,37 +48,6 @@ static char *dmem_dev_path;
 static uint64_t dmem_dap_base_address;
 static uint8_t dmem_dap_max_aps = 1;
 static uint32_t dmem_dap_ap_offset = 0x100;
-
-/* Convert AP address to tile local address. */
-static void ap_addr_2_tile(int *tile, uint32_t *addr)
-{
-	*addr -= RSH_CS_ROM_BASE;
-
-	if (*addr < RSH_CS_TILE_BASE) {
-		*tile = 0;
-	} else {
-		*addr -= RSH_CS_TILE_BASE;
-		*tile = *addr / RSH_CS_TILE_SIZE + 1;
-		*addr = *addr % RSH_CS_TILE_SIZE;
-	}
-}
-
-/*
- * Write 4 bytes on the APB bus.
- * tile = 0: access the root CS_ROM table
- *      > 0: access the ROM table of cluster (tile - 1)
- */
-static int coresight_write(uint32_t tile, uint32_t addr, uint32_t wdata)
-{
-	LOG_ERROR("I am here: %s\n", __func__);
-	return ERROR_OK;
-}
-
-static int coresight_read(uint32_t tile, uint32_t addr, uint32_t *value)
-{
-	LOG_ERROR("I am here: %s\n", __func__);
-	return ERROR_OK;
-}
 
 static int dmem_dp_q_read(struct adiv5_dap *dap, unsigned int reg,
 			   uint32_t *data)
@@ -184,8 +96,7 @@ static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 			   uint32_t *data)
 {
 	LOG_ERROR("I am here: %s\n", __func__);
-	uint32_t addr;
-	int rc = ERROR_OK, tile;
+	int rc = ERROR_OK;
 
 	if (is_adiv6(ap->dap)) {
 		static bool error_flagged;
@@ -197,41 +108,15 @@ static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 
 	switch (reg) {
 	case ADIV5_MEM_AP_REG_CSW:
-		*data = ap_csw;
-		break;
-
 	case ADIV5_MEM_AP_REG_CFG:
-		*data = 0;
-		break;
-
 	case ADIV5_MEM_AP_REG_BASE:
-		*data = RSH_CS_ROM_BASE;
-		break;
-
 	case ADIV5_AP_REG_IDR:
-		if (ap->ap_num == 0)
-			*data = APB_AP_IDR;
-		else
-			*data = 0;
-		break;
-
 	case ADIV5_MEM_AP_REG_BD0:
 	case ADIV5_MEM_AP_REG_BD1:
 	case ADIV5_MEM_AP_REG_BD2:
 	case ADIV5_MEM_AP_REG_BD3:
-		addr = (ap_tar & ~0xf) + (reg & 0x0C);
-		ap_addr_2_tile(&tile, &addr);
-		rc = coresight_read(tile, addr, data);
-		break;
-
 	case ADIV5_MEM_AP_REG_DRW:
-		addr = (ap_tar & ~0x3) + ap_tar_inc;
-		ap_addr_2_tile(&tile, &addr);
-		rc = coresight_read(tile, addr, data);
-		if (!rc && (ap_csw & CSW_ADDRINC_MASK))
-			ap_tar_inc += (ap_csw & 0x03) * 2;
 		break;
-
 	default:
 		LOG_INFO("Unknown command");
 		rc = ERROR_FAIL;
@@ -249,8 +134,7 @@ static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 			    uint32_t data)
 {
 	LOG_ERROR("I am here: %s\n", __func__);
-	int rc = ERROR_OK, tile;
-	uint32_t addr;
+	int rc = ERROR_OK;
 
 	if (is_adiv6(ap->dap)) {
 		static bool error_flagged;
@@ -267,30 +151,12 @@ static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 
 	switch (reg) {
 	case ADIV5_MEM_AP_REG_CSW:
-		ap_csw = data;
-		break;
-
 	case ADIV5_MEM_AP_REG_TAR:
-		ap_tar = data;
-		ap_tar_inc = 0;
-		break;
-
 	case ADIV5_MEM_AP_REG_BD0:
 	case ADIV5_MEM_AP_REG_BD1:
 	case ADIV5_MEM_AP_REG_BD2:
 	case ADIV5_MEM_AP_REG_BD3:
-		addr = (ap_tar & ~0xf) + (reg & 0x0C);
-		ap_addr_2_tile(&tile, &addr);
-		rc = coresight_write(tile, addr, data);
-		break;
-
 	case ADIV5_MEM_AP_REG_DRW:
-		ap_drw = data;
-		addr = (ap_tar & ~0x3) + ap_tar_inc;
-		ap_addr_2_tile(&tile, &addr);
-		rc = coresight_write(tile, addr, data);
-		if (!rc && (ap_csw & CSW_ADDRINC_MASK))
-			ap_tar_inc += (ap_csw & 0x03) * 2;
 		break;
 
 	default:

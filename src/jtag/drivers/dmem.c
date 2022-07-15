@@ -51,6 +51,14 @@ static uint64_t dmem_dap_base_address;
 static uint8_t dmem_dap_max_aps = 1;
 static uint32_t dmem_dap_ap_offset = 0x100;
 
+/* AP Emulation Mode */
+static uint64_t dmem_emu_base_address;
+static uint64_t dmem_emu_mapped_size;
+static void *dmem_emu_virt_base_addr;
+#define DMEM_MAX_EMULATE_APS 5
+static uint8_t dmem_emu_ap_count;
+static uint64_t dmem_emu_ap_list[DMEM_MAX_EMULATE_APS];
+
 static uint32_t dmem_get_ap_reg_offset(struct adiv5_ap *ap, unsigned int reg)
 {
 	return (dmem_dap_ap_offset * ap->ap_num) + reg;
@@ -173,6 +181,12 @@ static int dmem_connect(struct adiv5_dap *dap)
 		return ERROR_FAIL;
 	}
 
+	if (dmem_emu_ap_count && (!dmem_emu_base_address || !dmem_emu_mapped_size)) {
+		LOG_ERROR("dmem EMU Base address NOT set? value is 0\n");
+		return ERROR_FAIL;
+	}
+
+
 	dmem_fd = open(path, O_RDWR | O_SYNC);
 	if (dmem_fd == -1) {
 		LOG_ERROR("Unable to open %s\n", path);
@@ -211,6 +225,25 @@ static int dmem_connect(struct adiv5_dap *dap)
 
 	dmem_virt_base_addr = (char *)dmem_map_base + start_delta;
 
+	/* Lets Map the emulated address if necessary */
+	if (dmem_emu_ap_count) {
+		if ((dmem_emu_base_address % page_size) ||
+			(dmem_emu_mapped_size % page_size)) {
+			LOG_ERROR("Please align emulated base and size to pagesize 0x%lx\n", page_size);
+			return ERROR_FAIL;
+		}
+		dmem_emu_virt_base_addr = mmap(NULL,
+			dmem_emu_mapped_size,
+			(PROT_READ | PROT_WRITE),
+			MAP_SHARED, dmem_fd,
+			dmem_emu_base_address & ~(off_t) (page_size - 1));
+		if (dmem_emu_virt_base_addr == MAP_FAILED) {
+			LOG_ERROR("Mapping EMU address 0x%lx for 0x%lx bytes failed!\n",
+				  dmem_emu_base_address, dmem_emu_mapped_size);
+			return ERROR_FAIL;
+		}
+	}
+
 	return ERROR_OK;
 }
 
@@ -218,6 +251,9 @@ static void dmem_disconnect(struct adiv5_dap *dap)
 {
 	if (munmap(dmem_map_base, dmem_mapped_size) != -1) {
 		LOG_ERROR("%s: Failed to unmap mapped memory!\n", __func__);
+	}
+	if (dmem_emu_ap_count && munmap(dmem_emu_virt_base_addr, dmem_emu_mapped_size) != -1) {
+		LOG_ERROR("%s: Failed to unmap emu mapped memory!\n", __func__);
 	}
 	if (dmem_fd != -1) {
 		close(dmem_fd);
@@ -266,6 +302,42 @@ COMMAND_HANDLER(dmem_dap_ap_offset_command)
 	COMMAND_PARSE_NUMBER(u32, CMD_ARGV[0], dmem_dap_ap_offset);
 	return ERROR_OK;
 }
+
+COMMAND_HANDLER(dmem_emu_base_address_command)
+{
+	if (CMD_ARGC != 2) {
+		command_print(CMD, "Need address and Size");
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+	COMMAND_PARSE_NUMBER(u64, CMD_ARGV[0], dmem_emu_base_address);
+	COMMAND_PARSE_NUMBER(u64, CMD_ARGV[1], dmem_emu_mapped_size);
+
+	return ERROR_OK;
+}
+
+COMMAND_HANDLER(dmem_emu_ap_list_command)
+{
+	int i;
+	int argc = CMD_ARGC;
+	uint64_t em_ap;
+
+	if (argc > DMEM_MAX_EMULATE_APS) {
+		command_print(CMD, "Max emulated APs can be upto %d", DMEM_MAX_EMULATE_APS);
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	}
+	for (i = 0; i < argc; i++) {
+		COMMAND_PARSE_NUMBER(u64, CMD_ARGV[i], em_ap);
+		dmem_emu_ap_list[i] = em_ap;
+	}
+	for (i = 0; i < argc; i++)
+		command_print(CMD,"dmem_emu_ap_list[%d]=%ld\n", i, dmem_emu_ap_list[i]);
+
+	dmem_emu_ap_count = CMD_ARGC;
+
+	return ERROR_OK;
+}
+
+
 COMMAND_HANDLER(dmem_dap_config_info_command)
 {
 	if (CMD_ARGC != 0) {
@@ -277,6 +349,17 @@ COMMAND_HANDLER(dmem_dap_config_info_command)
 	command_print(CMD," Base Address : 0x%lx", dmem_dap_base_address);
 	command_print(CMD," Max APs      : %d", dmem_dap_max_aps);
 	command_print(CMD," AP offset    : 0x%08x", dmem_dap_ap_offset);
+
+	if (dmem_emu_ap_count) {
+		int i;
+
+		command_print(CMD," Emulated AP details:");
+		command_print(CMD," Emulated address  : 0x%lx", dmem_emu_base_address);
+		command_print(CMD," Emulated size     : 0x%lx", dmem_emu_mapped_size);
+		command_print(CMD," Emulated AP Count : %d", dmem_emu_ap_count);
+		for (i = 0; i < dmem_emu_ap_count; i++)
+			command_print(CMD," Emulated AP [%d]  : %ld", i, dmem_emu_ap_list[i]);
+	}
 	return ERROR_OK;
 }
 
@@ -308,6 +391,20 @@ static const struct command_registration dmem_dap_subcommand_handlers[] = {
 		.mode = COMMAND_CONFIG,
 		.help = "set the offsets of each ap index",
 		.usage = "<0x100>",
+	},
+	{
+		.name = "emu_base_address",
+		.handler = dmem_emu_base_address_command,
+		.mode = COMMAND_CONFIG,
+		.help = "set the base address and size of emulated AP range (all emulated APs access this range)",
+		.usage = "<0x100 0x100>",
+	},
+	{
+		.name = "emu_ap_list",
+		.handler = dmem_emu_ap_list_command,
+		.mode = COMMAND_CONFIG,
+		.help = "set the list of AP indices to be emulated (upto max)",
+		.usage = "<1 5>",
 	},
 	{
 		.name = "info",

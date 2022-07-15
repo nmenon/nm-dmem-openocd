@@ -73,7 +73,6 @@ static uint32_t dmem_get_ap_reg(struct adiv5_ap *ap, unsigned int reg)
 static int dmem_dp_q_read(struct adiv5_dap *dap, unsigned int reg,
 			   uint32_t *data)
 {
-	LOG_ERROR("I am here: %s\n", __func__);
 	if (!data)
 		return ERROR_OK;
 
@@ -96,7 +95,6 @@ static int dmem_dp_q_read(struct adiv5_dap *dap, unsigned int reg,
 static int dmem_dp_q_write(struct adiv5_dap *dap, unsigned int reg,
 			    uint32_t data)
 {
-	LOG_ERROR("I am here: %s\n", __func__);
 	switch (reg) {
 	case DP_CTRL_STAT:
 		dp_ctrl_stat = data;
@@ -106,7 +104,6 @@ static int dmem_dp_q_write(struct adiv5_dap *dap, unsigned int reg,
 		ap_bank = (data & DP_SELECT_APBANK) >> 4;
 		break;
 	default:
-		LOG_INFO("Unknown command");
 		break;
 	}
 
@@ -116,7 +113,6 @@ static int dmem_dp_q_write(struct adiv5_dap *dap, unsigned int reg,
 static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 			   uint32_t *data)
 {
-	LOG_ERROR("I am here: %s\n", __func__);
 
 	if (is_adiv6(ap->dap)) {
 		static bool error_flagged;
@@ -127,7 +123,6 @@ static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 	}
 
 	*data = dmem_get_ap_reg(ap, reg);
-	LOG_ERROR("%s: AP=%ld read[0x%02x]: 0x%08x\n", __func__, ap-> ap_num, reg, *data);
 
 	return ERROR_OK;
 }
@@ -135,7 +130,6 @@ static int dmem_ap_q_read(struct adiv5_ap *ap, unsigned int reg,
 static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 			    uint32_t data)
 {
-	LOG_ERROR("I am here: %s\n", __func__);
 
 	if (is_adiv6(ap->dap)) {
 		static bool error_flagged;
@@ -152,20 +146,17 @@ static int dmem_ap_q_write(struct adiv5_ap *ap, unsigned int reg,
 	}
 
 	dmem_set_ap_reg(ap, reg, data);
-	LOG_ERROR("%s: AP=%ld wrote[0x%02x]: 0x%08x\n", __func__, ap->ap_num, reg, data);
 
 	return ERROR_OK;
 }
 
 static int dmem_ap_q_abort(struct adiv5_dap *dap, uint8_t *ack)
 {
-	LOG_ERROR("I am here: %s\n", __func__);
 	return ERROR_OK;
 }
 
 static int dmem_dp_run(struct adiv5_dap *dap)
 {
-	LOG_ERROR("I am here: %s\n", __func__);
 	int retval = dmem_dap_retval;
 
 	/* Clear the error code. */
@@ -181,8 +172,6 @@ static int dmem_connect(struct adiv5_dap *dap)
 	long page_size = sysconf(_SC_PAGESIZE);
 	long start_delta, end_delta;
 
-	LOG_ERROR("I am here: %s\n", __func__);
-
 	if (!dmem_dap_base_address) {
 		LOG_ERROR("dmem DAP Base address NOT set? value is 0\n");
 		return ERROR_FAIL;
@@ -193,7 +182,6 @@ static int dmem_connect(struct adiv5_dap *dap)
 		LOG_ERROR("Unable to open %s\n", path);
 		return ERROR_FAIL;
 	}
-	LOG_ERROR("page_size = %ld\n", page_size);
 
 	dmem_total_memory_window_size = (dmem_dap_max_aps + 1) * dmem_dap_ap_offset;
 
@@ -220,7 +208,8 @@ static int dmem_connect(struct adiv5_dap *dap)
 			MAP_SHARED, dmem_fd,
 			dmem_mapped_start & ~(off_t) (page_size - 1));
 	if (dmem_map_base == MAP_FAILED) {
-		LOG_ERROR("Mapping address 0x%lx for 0x%lx failed!\n", dmem_mapped_start,dmem_mapped_size);
+		LOG_ERROR("Mapping address 0x%lx for 0x%lx bytes failed!\n",
+			  dmem_mapped_start, dmem_mapped_size);
 		return ERROR_FAIL;
 	}
 
@@ -231,7 +220,6 @@ static int dmem_connect(struct adiv5_dap *dap)
 
 static void dmem_disconnect(struct adiv5_dap *dap)
 {
-	LOG_ERROR("I am here: %s\n", __func__);
 	if (munmap(dmem_map_base, dmem_mapped_size) != -1) {
 		LOG_ERROR("%s: Failed to unmap mapped memory!\n", __func__);
 	}
